@@ -26,6 +26,7 @@ fun App() {
         var isMapMode by remember { mutableStateOf(false) }
         var selectedParking by remember { mutableStateOf<ParkingSpace?>(null) }
         var searchQuery by remember { mutableStateOf("") }
+        var showOnlyAvailable by remember { mutableStateOf(false) } // 是否只顯示有剩餘車位的開關
 
         // 載入 API 資料
         LaunchedEffect(Unit) {
@@ -40,17 +41,28 @@ fun App() {
             }
         }
 
-        // 🎯 結合關鍵字搜尋與 GPS 距離排序的過濾清單
-        val filteredParkingList = remember(parkingList, searchQuery, currentLatLng) {
-            val list = if (searchQuery.isBlank()) {
-                parkingList
-            } else {
-                parkingList.filter {
-                    it.name.contains(searchQuery, ignoreCase = true) ||
-                            it.address.contains(searchQuery, ignoreCase = true)
+        // 🎯 結合關鍵字搜尋、車位快篩與 GPS 距離排序的過濾清單
+        val filteredParkingList = remember(parkingList, searchQuery, showOnlyAvailable, currentLatLng) {
+            val list = parkingList.filter { parking ->
+                // 關鍵字過濾
+                val matchesSearch = if (searchQuery.isBlank()) {
+                    true
+                } else {
+                    parking.name.contains(searchQuery, ignoreCase = true) ||
+                            parking.address.contains(searchQuery, ignoreCase = true)
                 }
+
+                // 車位快篩過濾（如果有打勾，就只留車位 > 0 的）
+                val matchesAvailable = if (showOnlyAvailable) {
+                    parking.availableSpaces > 0
+                } else {
+                    true
+                }
+
+                matchesSearch && matchesAvailable
             }
 
+            // 距離排序
             if (currentLatLng != null) {
                 list.sortedBy { parking ->
                     calculateDistanceKm(
@@ -82,7 +94,7 @@ fun App() {
         ) { paddingValues ->
             // 🎯 根據不同模式使用不同的排版容器
             if (isMapMode) {
-                // 地圖模式：使用 Box 讓搜尋框懸浮在地圖上方
+                // 地圖模式：使用 Box 讓搜尋與快篩面板懸浮在地圖上方
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -97,21 +109,36 @@ fun App() {
                         }
                     )
 
-                    // 懸浮在頂部的關鍵字過濾框（帶點半透明背景避免看不清楚）
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
+                    // 🎯 懸浮控制面板（把搜尋框與快篩按鈕整齊包在 Surface 裡，才不會互相遮擋）
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
                             .align(Alignment.TopCenter),
-                        placeholder = { Text("搜尋停車場名稱或地址...") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                        )
-                    )
+                        shape = MaterialTheme.shapes.medium,
+                        tonalElevation = 6.dp,
+                        shadowElevation = 6.dp,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("搜尋停車場名稱或地址...") },
+                                singleLine = true
+                            )
+
+                            FilterChip(
+                                selected = showOnlyAvailable,
+                                onClick = { showOnlyAvailable = !showOnlyAvailable },
+                                label = { Text("僅顯示有剩餘車位") }
+                            )
+                        }
+                    }
                 }
             } else {
                 // 清單模式：使用 Column 讓搜尋框與清單上下排列
@@ -128,6 +155,13 @@ fun App() {
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("搜尋停車場名稱或地址...") },
                         singleLine = true
+                    )
+
+                    // 🎯 車位快篩按鈕
+                    FilterChip(
+                        selected = showOnlyAvailable,
+                        onClick = { showOnlyAvailable = !showOnlyAvailable },
+                        label = { Text("僅顯示有剩餘車位") }
                     )
 
                     LazyColumn(
