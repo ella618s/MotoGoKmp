@@ -11,6 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.motogokmp.models.ParkingSpace
 import com.example.motogokmp.network.ParkingApi
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +30,9 @@ fun App() {
         var selectedParking by remember { mutableStateOf<ParkingSpace?>(null) }
         var searchQuery by remember { mutableStateOf("") }
         var showOnlyAvailable by remember { mutableStateOf(false) } // 是否只顯示有剩餘車位的開關
+        // 記錄已被加入最愛的停車場名稱集合
+        var favoriteNames by remember { mutableStateOf(emptySet<String>()) }
+        var showOnlyFavorites by remember { mutableStateOf(false) } // 👈 是否只顯示最愛
 
         // 載入 API 資料
         LaunchedEffect(Unit) {
@@ -41,8 +47,8 @@ fun App() {
             }
         }
 
-        // 🎯 結合關鍵字搜尋、車位快篩與 GPS 距離排序的過濾清單
-        val filteredParkingList = remember(parkingList, searchQuery, showOnlyAvailable, currentLatLng) {
+        // 🎯 結合關鍵字搜尋、車位快篩、最愛快篩與 GPS 距離排序的過濾清單
+        val filteredParkingList = remember(parkingList, searchQuery, showOnlyAvailable, showOnlyFavorites, favoriteNames, currentLatLng) {
             val list = parkingList.filter { parking ->
                 // 關鍵字過濾
                 val matchesSearch = if (searchQuery.isBlank()) {
@@ -52,14 +58,22 @@ fun App() {
                             parking.address.contains(searchQuery, ignoreCase = true)
                 }
 
-                // 車位快篩過濾（如果有打勾，就只留車位 > 0 的）
+                // 車位快篩過濾
                 val matchesAvailable = if (showOnlyAvailable) {
                     parking.availableSpaces > 0
                 } else {
                     true
                 }
 
-                matchesSearch && matchesAvailable
+                // 收藏快篩過濾
+                val matchesFavorite = if (showOnlyFavorites) {
+                    favoriteNames.contains(parking.name)
+                } else {
+                    true
+                }
+
+                // 🎯 必須把三個條件全部結合起來！
+                matchesSearch && matchesAvailable && matchesFavorite
             }
 
             // 距離排序
@@ -132,11 +146,23 @@ fun App() {
                                 singleLine = true
                             )
 
-                            FilterChip(
-                                selected = showOnlyAvailable,
-                                onClick = { showOnlyAvailable = !showOnlyAvailable },
-                                label = { Text("僅顯示有剩餘車位") }
-                            )
+                            // 🎯 把兩個 FilterChip 並排放在 Row 裡面
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = showOnlyAvailable,
+                                    onClick = { showOnlyAvailable = !showOnlyAvailable },
+                                    label = { Text("僅有車位") }
+                                )
+
+                                FilterChip(
+                                    selected = showOnlyFavorites,
+                                    onClick = { showOnlyFavorites = !showOnlyFavorites },
+                                    label = { Text("我的最愛 ❤️") }
+                                )
+                            }
                         }
                     }
                 }
@@ -157,12 +183,25 @@ fun App() {
                         singleLine = true
                     )
 
-                    // 🎯 車位快篩按鈕
-                    FilterChip(
-                        selected = showOnlyAvailable,
-                        onClick = { showOnlyAvailable = !showOnlyAvailable },
-                        label = { Text("僅顯示有剩餘車位") }
-                    )
+
+                    // 🎯 把兩個 FilterChip 並排放在 Row 裡面
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 🎯 車位快篩按鈕
+                        FilterChip(
+                            selected = showOnlyAvailable,
+                            onClick = { showOnlyAvailable = !showOnlyAvailable },
+                            label = { Text("僅有車位") }
+                        )
+
+                        FilterChip(
+                            selected = showOnlyFavorites,
+                            onClick = { showOnlyFavorites = !showOnlyFavorites },
+                            label = { Text("我的最愛 ❤️") }
+                        )
+                    }
 
                     LazyColumn(
                         modifier = Modifier
@@ -201,6 +240,14 @@ fun App() {
                             ParkingItemCard(
                                 item = item,
                                 currentLatLng = currentLatLng,
+                                isFavorite = favoriteNames.contains(item.name), // 👈 傳入是否已收藏
+                                onFavoriteClick = {                            // 👈 傳入點擊切換邏輯
+                                    favoriteNames = if (favoriteNames.contains(item.name)) {
+                                        favoriteNames - item.name
+                                    } else {
+                                        favoriteNames + item.name
+                                    }
+                                },
                                 onClick = {
                                     selectedParking = item
                                 }
@@ -221,6 +268,34 @@ fun App() {
                             .padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = selectedParking!!.name,
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // 🎯 底部詳情卡片的愛心按鈕
+                            IconButton(onClick = {
+                                val name = selectedParking!!.name
+                                favoriteNames = if (favoriteNames.contains(name)) {
+                                    favoriteNames - name
+                                } else {
+                                    favoriteNames + name
+                                }
+                            }) {
+                                val isFav = favoriteNames.contains(selectedParking!!.name)
+                                Icon(
+                                    imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "收藏",
+                                    tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         Text(
                             text = selectedParking!!.name,
                             style = MaterialTheme.typography.titleLarge
@@ -263,6 +338,8 @@ fun App() {
 fun ParkingItemCard(
     item: ParkingSpace,
     currentLatLng: LatLng?,
+    isFavorite: Boolean,          // 👈 參數
+    onFavoriteClick: () -> Unit,   // 👈 回呼
     onClick: () -> Unit
 ) {
     val distanceText = remember(currentLatLng, item) {
@@ -281,6 +358,28 @@ fun ParkingItemCard(
             }
         } else {
             null
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = item.address,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+
+        // 🎯 愛心收藏按鈕
+        IconButton(onClick = onFavoriteClick) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                contentDescription = "收藏",
+                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 

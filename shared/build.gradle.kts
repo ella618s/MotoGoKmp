@@ -51,6 +51,7 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
+            implementation(compose.materialIconsExtended)
 
             // 網路與序列化
             implementation("io.ktor:ktor-client-core:2.3.12")
