@@ -62,6 +62,8 @@ kotlin {
         androidMain.dependencies {
             implementation("io.ktor:ktor-client-okhttp:2.3.12")
             implementation("com.google.android.gms:play-services-location:21.3.0")
+            // osmdroid 依賴
+            implementation("org.osmdroid:osmdroid-android:6.1.18")
         }
         iosMain.dependencies {
             implementation("io.ktor:ktor-client-darwin:2.3.12")

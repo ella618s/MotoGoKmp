@@ -1,5 +1,6 @@
 package com.example.motogokmp
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,11 +18,14 @@ fun App() {
     MaterialTheme {
         var parkingList by remember { mutableStateOf<List<ParkingSpace>>(emptyList()) }
         var isLoading by remember { mutableStateOf(true) }
-
         // 定位相關狀態
         var locationInfo by remember { mutableStateOf("尚未取得定位") }
-        var currentLatLng by remember { mutableStateOf<LatLng?>(null) } // <--- 1. 記錄目前的經緯度
+        var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
         val locationService = remember { LocationService() }
+        // 檢視模式狀態：false 為清單模式，true 為地圖模式
+        var isMapMode by remember { mutableStateOf(false) }
+        var selectedParking by remember { mutableStateOf<ParkingSpace?>(null) }
+        var searchQuery by remember { mutableStateOf("") }
 
         // 載入 API 資料
         LaunchedEffect(Unit) {
@@ -29,20 +33,26 @@ fun App() {
                 val api = ParkingApi()
                 val result = api.fetchTaipeiParking()
                 parkingList = result
-                println("API 資料裡面的內容 ${parkingList.first()}")
-                println("API 成功抓到資料，數量：${result.size}")
             } catch (e: Exception) {
                 e.printStackTrace()
-                println("API 抓取失敗：${e.message}")
             } finally {
                 isLoading = false
             }
         }
 
-        // 根據目前 GPS 排序停車場清單（如果有取得定位的話）
-        val sortedParkingList = remember(parkingList, currentLatLng) {
+        // 🎯 結合關鍵字搜尋與 GPS 距離排序的過濾清單
+        val filteredParkingList = remember(parkingList, searchQuery, currentLatLng) {
+            val list = if (searchQuery.isBlank()) {
+                parkingList
+            } else {
+                parkingList.filter {
+                    it.name.contains(searchQuery, ignoreCase = true) ||
+                            it.address.contains(searchQuery, ignoreCase = true)
+                }
+            }
+
             if (currentLatLng != null) {
-                parkingList.sortedBy { parking ->
+                list.sortedBy { parking ->
                     calculateDistanceKm(
                         currentLatLng!!.latitude,
                         currentLatLng!!.longitude,
@@ -51,33 +61,84 @@ fun App() {
                     )
                 }
             } else {
-                parkingList
+                list
             }
         }
 
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("MotoGo - 台北市即時停車位") })
+                TopAppBar(
+                    title = { Text(if (isMapMode) "MotoGo - 地圖模式" else "MotoGo - 台北市即時停車位") },
+                    actions = {
+                        TextButton(onClick = { isMapMode = !isMapMode }) {
+                            Text(
+                                text = if (isMapMode) "切換清單" else "切換地圖",
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                )
             }
         ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator()
-                } else {
-                    LazyColumn(
+            // 🎯 根據不同模式使用不同的排版容器
+            if (isMapMode) {
+                // 地圖模式：使用 Box 讓搜尋框懸浮在地圖上方
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                ) {
+                    MapView(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
+                        parkingList = filteredParkingList,
+                        currentLatLng = currentLatLng,
+                        onMarkerClick = { parking ->
+                            selectedParking = parking
+                        }
+                    )
+
+                    // 懸浮在頂部的關鍵字過濾框（帶點半透明背景避免看不清楚）
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .align(Alignment.TopCenter),
+                        placeholder = { Text("搜尋停車場名稱或地址...") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                        )
+                    )
+                }
+            } else {
+                // 清單模式：使用 Column 讓搜尋框與清單上下排列
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("搜尋停車場名稱或地址...") },
+                        singleLine = true
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // 定位按鈕區塊
                         item {
                             Card(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
                             ) {
                                 Column(
@@ -89,7 +150,7 @@ fun App() {
                                     Button(onClick = {
                                         locationService.getCurrentLocation { latLng ->
                                             if (latLng != null) {
-                                                currentLatLng = latLng // <--- 3. 儲存經緯度觸發畫面重新排序
+                                                currentLatLng = latLng
                                                 locationInfo = "緯度: ${latLng.latitude}\n經度: ${latLng.longitude}"
                                             } else {
                                                 locationInfo = "取得定位失敗或無權限"
@@ -102,12 +163,60 @@ fun App() {
                             }
                         }
 
-                        // 使用排序後的清單，並把當前座標傳進去計算距離
-                        items(sortedParkingList) { item ->
+                        items(filteredParkingList) { item ->
                             ParkingItemCard(
                                 item = item,
-                                currentLatLng = currentLatLng
+                                currentLatLng = currentLatLng,
+                                onClick = {
+                                    selectedParking = item
+                                }
                             )
+                        }
+                    }
+                }
+            }
+
+            // 底部詳情卡片 (ModalBottomSheet) 保持在最外層共用
+            if (selectedParking != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { selectedParking = null }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = selectedParking!!.name,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = "地址：${selectedParking!!.address}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = "剩餘車位：${selectedParking!!.availableSpaces}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selectedParking!!.availableSpaces > 0)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.error
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                openMapNavigation(
+                                    lat = selectedParking!!.lat,
+                                    lng = selectedParking!!.lng,
+                                    name = selectedParking!!.name
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("開啟導航前往")
                         }
                     }
                 }
@@ -117,8 +226,11 @@ fun App() {
 }
 
 @Composable
-fun ParkingItemCard(item: ParkingSpace, currentLatLng: LatLng?) {
-    // 計算與使用者的距離
+fun ParkingItemCard(
+    item: ParkingSpace,
+    currentLatLng: LatLng?,
+    onClick: () -> Unit
+) {
     val distanceText = remember(currentLatLng, item) {
         if (currentLatLng != null) {
             val dist = calculateDistanceKm(
@@ -139,25 +251,24 @@ fun ParkingItemCard(item: ParkingSpace, currentLatLng: LatLng?) {
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick), // 👈 讓整張卡片可被點擊
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 第一行：停車場名稱
             Text(
                 text = item.name,
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 地址與右下角距離的橫向排版
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom // 讓右側文字靠底對齊
+                verticalAlignment = Alignment.Bottom
             ) {
-                // 左側：地址（給定適當的 weight 避免擠壓）
                 Text(
                     text = item.address,
                     style = MaterialTheme.typography.bodyMedium,
@@ -165,7 +276,6 @@ fun ParkingItemCard(item: ParkingSpace, currentLatLng: LatLng?) {
                     modifier = Modifier.weight(1f)
                 )
 
-                // 右下角：距離
                 if (distanceText != null) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -178,7 +288,6 @@ fun ParkingItemCard(item: ParkingSpace, currentLatLng: LatLng?) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 剩餘車位
             Text(
                 text = "剩餘車位：${item.availableSpaces}",
                 style = MaterialTheme.typography.bodyLarge,
