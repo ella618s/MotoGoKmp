@@ -21,6 +21,8 @@ fun App() {
     MaterialTheme {
         var parkingList by remember { mutableStateOf<List<ParkingSpace>>(emptyList()) }
         var isLoading by remember { mutableStateOf(true) }
+        // 目前選擇的城市代碼，預設為 Taipei
+        var selectedCity by remember { mutableStateOf("Taipei") }
         // 定位相關狀態
         var locationInfo by remember { mutableStateOf("尚未取得定位") }
         var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
@@ -34,14 +36,19 @@ fun App() {
         var favoriteNames by remember { mutableStateOf(emptySet<String>()) }
         var showOnlyFavorites by remember { mutableStateOf(false) } // 👈 是否只顯示最愛
 
+
         // 載入 API 資料
-        LaunchedEffect(Unit) {
+        // 🎯 監聽 selectedCity，只要城市改變就重新抓取對應 API 資料
+        LaunchedEffect(selectedCity) {
+            isLoading = true
             try {
                 val api = ParkingApi()
-                val result = api.fetchTaipeiParking()
+                // 假設你在 ParkingApi 裡實作了可以傳入 city 的方法，例如 fetchParking(selectedCity)
+                val result = api.fetchParking(selectedCity)
                 parkingList = result
             } catch (e: Exception) {
                 e.printStackTrace()
+                parkingList = emptyList()
             } finally {
                 isLoading = false
             }
@@ -94,8 +101,41 @@ fun App() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(if (isMapMode) "MotoGo - 地圖模式" else "MotoGo - 台北市即時停車位") },
+                    title = {
+                        // 顯示目前選擇的城市名稱
+                        val cityName = when(selectedCity) {
+                            "taipei" -> "台北市"
+                            "NewTaipei" -> "新北市"
+                            "Taichung" -> "台中市"
+                            else -> selectedCity
+                        }
+                        Text(if (isMapMode) "MotoGo - $cityName 地圖" else "MotoGo - $cityName 即時停車位")
+                    },
                     actions = {
+                        // 🎯 城市快速切換按鈕範例 (你也可以改成 DropdownMenu 讓選擇更多元)
+                        TextButton(onClick = {
+                            // 🎯 決定下一個要切換的城市代碼
+                            val nextCity = when(selectedCity) {
+                                "Taipei" -> "NewTaipei"
+                                "NewTaipei" -> "Taichung"
+                                else -> "Taipei"
+                            }
+
+                            // 🎯 防呆檢查：如果目標城市跟現在一樣，就直接跳過
+                            if (selectedCity == nextCity) {
+                                return@TextButton // 這裡直接 return@TextButton 即可
+                            }
+
+                            selectedCity = nextCity
+                        }) {
+                            val nextCityName = when(selectedCity) {
+                                "Taipei" -> "切換新北"
+                                "NewTaipei" -> "切換台中"
+                                else -> "切換台北"
+                            }
+                            Text(text = nextCityName, color = MaterialTheme.colorScheme.secondary)
+                        }
+
                         TextButton(onClick = { isMapMode = !isMapMode }) {
                             Text(
                                 text = if (isMapMode) "切換清單" else "切換地圖",
