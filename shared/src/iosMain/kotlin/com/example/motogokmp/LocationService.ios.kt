@@ -40,16 +40,19 @@ actual class LocationService : NSObject(), CLLocationManagerDelegateProtocol {
     override fun locationManager(manager: CLLocationManager, didUpdateLocations: List<*>) {
         locationManager.stopUpdatingLocation()
         val location = didUpdateLocations.lastOrNull() as? CLLocation
-        if (location != null) {
-            @OptIn(ExperimentalForeignApi::class)
-            val coordinate = location.coordinate.useContents {
+
+        @OptIn(ExperimentalForeignApi::class)
+        val coordinate = location?.let {
+            it.coordinate.useContents {
                 LatLng(latitude, longitude)
             }
-            locationCallback?.invoke(coordinate)
-        } else {
-            locationCallback?.invoke(null)
         }
-        locationCallback = null
+
+        // 強制將回調丟回主執行緒，避免多執行緒衝突與 UI 崩潰
+        dispatch_async(dispatch_get_main_queue()) {
+            locationCallback?.invoke(coordinate)
+            locationCallback = null
+        }
     }
 
     override fun locationManager(manager: CLLocationManager, didChangeAuthorizationStatus: CLAuthorizationStatus) {
@@ -58,8 +61,10 @@ actual class LocationService : NSObject(), CLLocationManagerDelegateProtocol {
         ) {
             locationManager.startUpdatingLocation()
         } else if (didChangeAuthorizationStatus != kCLAuthorizationStatusNotDetermined) {
-            locationCallback?.invoke(null)
-            locationCallback = null
+            dispatch_async(dispatch_get_main_queue()) {
+                locationCallback?.invoke(null)
+                locationCallback = null
+            }
         }
     }
 }

@@ -14,6 +14,11 @@ import com.example.motogokmp.network.ParkingApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import com.example.motogokmp.models.Coordinate
+import com.example.motogokmp.network.RouteApiService
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,7 +29,7 @@ fun App() {
         // 目前選擇的城市代碼，預設為 Taipei
         var selectedCity by remember { mutableStateOf("Taipei") }
         // 定位相關狀態
-        var locationInfo by remember { mutableStateOf("尚未取得定位") }
+        var locationInfo by remember { mutableStateOf("正在取得定位...") }
         var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
         val locationService = remember { LocationService() }
         // 檢視模式狀態：false 為清單模式，true 為地圖模式
@@ -35,7 +40,22 @@ fun App() {
         // 記錄已被加入最愛的停車場名稱集合
         var favoriteNames by remember { mutableStateOf(emptySet<String>()) }
         var showOnlyFavorites by remember { mutableStateOf(false) } // 👈 是否只顯示最愛
+        // 宣告儲存導航路線點位的變數
+        var currentRoutePoints by remember { mutableStateOf<List<Coordinate>>(emptyList()) }
+        val coroutineScope = rememberCoroutineScope()
+        var isCalculatingRoute by remember { mutableStateOf(false) }
 
+        // 🎯 1. App 一開機立刻自動請求權限並取得定位，解決第一次導航延遲的問題
+        LaunchedEffect(Unit) {
+            while (currentLatLng == null) {
+                locationService.getCurrentLocation { latLng ->
+                    if (latLng != null) {
+                        currentLatLng = latLng
+                    }
+                }
+                delay(500) // 每 0.5 秒自動重試一次，直到使用者按允許並成功取得座標
+            }
+        }
 
         // 載入 API 資料
         // 🎯 監聽 selectedCity，只要城市改變就重新抓取對應 API 資料
@@ -43,7 +63,6 @@ fun App() {
             isLoading = true
             try {
                 val api = ParkingApi()
-                // 假設你在 ParkingApi 裡實作了可以傳入 city 的方法，例如 fetchParking(selectedCity)
                 val result = api.fetchParking(selectedCity)
                 parkingList = result
             } catch (e: Exception) {
@@ -79,7 +98,6 @@ fun App() {
                     true
                 }
 
-                // 🎯 必須把三個條件全部結合起來！
                 matchesSearch && matchesAvailable && matchesFavorite
             }
 
@@ -102,7 +120,6 @@ fun App() {
             topBar = {
                 TopAppBar(
                     title = {
-                        // 顯示目前選擇的城市名稱
                         val cityName = when(selectedCity) {
                             "taipei" -> "台北市"
                             "NewTaipei" -> "新北市"
@@ -112,21 +129,19 @@ fun App() {
                         Text(if (isMapMode) "MotoGo - $cityName 地圖" else "MotoGo - $cityName 即時停車位")
                     },
                     actions = {
-                        // 🎯 城市快速切換按鈕範例 (你也可以改成 DropdownMenu 讓選擇更多元)
                         TextButton(onClick = {
-                            // 🎯 決定下一個要切換的城市代碼
                             val nextCity = when(selectedCity) {
                                 "Taipei" -> "NewTaipei"
                                 "NewTaipei" -> "Taichung"
                                 else -> "Taipei"
                             }
 
-                            // 🎯 防呆檢查：如果目標城市跟現在一樣，就直接跳過
                             if (selectedCity == nextCity) {
-                                return@TextButton // 這裡直接 return@TextButton 即可
+                                return@TextButton
                             }
 
                             selectedCity = nextCity
+                            currentRoutePoints = emptyList() // 切換城市時立刻清空舊導航線！
                         }) {
                             val nextCityName = when(selectedCity) {
                                 "Taipei" -> "切換新北"
@@ -146,9 +161,7 @@ fun App() {
                 )
             }
         ) { paddingValues ->
-            // 🎯 根據不同模式使用不同的排版容器
             if (isMapMode) {
-                // 地圖模式：使用 Box 讓搜尋與快篩面板懸浮在地圖上方
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -158,12 +171,11 @@ fun App() {
                         modifier = Modifier.fillMaxSize(),
                         parkingList = filteredParkingList,
                         currentLatLng = currentLatLng,
+                        routePoints = currentRoutePoints,
                         onMarkerClick = { parking ->
                             selectedParking = parking
                         }
                     )
-
-                    // 🎯 懸浮控制面板（把搜尋框與快篩按鈕整齊包在 Surface 裡，才不會互相遮擋）
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -186,7 +198,6 @@ fun App() {
                                 singleLine = true
                             )
 
-                            // 🎯 把兩個 FilterChip 並排放在 Row 裡面
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -207,7 +218,6 @@ fun App() {
                     }
                 }
             } else {
-                // 清單模式：使用 Column 讓搜尋框與清單上下排列
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -223,13 +233,10 @@ fun App() {
                         singleLine = true
                     )
 
-
-                    // 🎯 把兩個 FilterChip 並排放在 Row 裡面
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // 🎯 車位快篩按鈕
                         FilterChip(
                             selected = showOnlyAvailable,
                             onClick = { showOnlyAvailable = !showOnlyAvailable },
@@ -243,45 +250,20 @@ fun App() {
                         )
                     }
 
+                    // 🎯 這裡已經把原本佔空間又醜的「取得目前 GPS 座標」手動按鈕卡片整個移除！
+
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(text = locationInfo, style = MaterialTheme.typography.bodyLarge)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Button(onClick = {
-                                        locationService.getCurrentLocation { latLng ->
-                                            if (latLng != null) {
-                                                currentLatLng = latLng
-                                                locationInfo = "緯度: ${latLng.latitude}\n經度: ${latLng.longitude}"
-                                            } else {
-                                                locationInfo = "取得定位失敗或無權限"
-                                            }
-                                        }
-                                    }) {
-                                        Text("取得目前 GPS 座標")
-                                    }
-                                }
-                            }
-                        }
-
                         items(filteredParkingList) { item ->
                             ParkingItemCard(
                                 item = item,
                                 currentLatLng = currentLatLng,
-                                isFavorite = favoriteNames.contains(item.name), // 👈 傳入是否已收藏
-                                onFavoriteClick = {                            // 👈 傳入點擊切換邏輯
+                                isFavorite = favoriteNames.contains(item.name),
+                                onFavoriteClick = {
                                     favoriteNames = if (favoriteNames.contains(item.name)) {
                                         favoriteNames - item.name
                                     } else {
@@ -297,8 +279,10 @@ fun App() {
                 }
             }
 
-            // 底部詳情卡片 (ModalBottomSheet) 保持在最外層共用
+            // 底部詳情卡片 (ModalBottomSheet)
             if (selectedParking != null) {
+                val currentParking = selectedParking!!
+
                 ModalBottomSheet(
                     onDismissRequest = { selectedParking = null }
                 ) {
@@ -314,21 +298,20 @@ fun App() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = selectedParking!!.name,
+                                text = currentParking.name,
                                 style = MaterialTheme.typography.titleLarge,
                                 modifier = Modifier.weight(1f)
                             )
 
-                            // 🎯 底部詳情卡片的愛心按鈕
                             IconButton(onClick = {
-                                val name = selectedParking!!.name
+                                val name = currentParking.name
                                 favoriteNames = if (favoriteNames.contains(name)) {
                                     favoriteNames - name
                                 } else {
                                     favoriteNames + name
                                 }
                             }) {
-                                val isFav = favoriteNames.contains(selectedParking!!.name)
+                                val isFav = favoriteNames.contains(currentParking.name)
                                 Icon(
                                     imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                     contentDescription = "收藏",
@@ -336,18 +319,15 @@ fun App() {
                                 )
                             }
                         }
+
                         Text(
-                            text = selectedParking!!.name,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            text = "地址：${selectedParking!!.address}",
+                            text = "地址：${currentParking.address}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            text = "剩餘車位：${selectedParking!!.availableSpaces}",
+                            text = "剩餘車位：${currentParking.availableSpaces}",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (selectedParking!!.availableSpaces > 0)
+                            color = if (currentParking.availableSpaces > 0)
                                 MaterialTheme.colorScheme.primary
                             else
                                 MaterialTheme.colorScheme.error
@@ -355,17 +335,52 @@ fun App() {
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        val destLat = currentParking.lat
+                        val destLng = currentParking.lng
+
                         Button(
                             onClick = {
-                                openMapNavigation(
-                                    lat = selectedParking!!.lat,
-                                    lng = selectedParking!!.lng,
-                                    name = selectedParking!!.name
-                                )
+                                if (isCalculatingRoute) return@Button
+                                isCalculatingRoute = true
+
+                                isMapMode = true
+                                selectedParking = null
+
+                                // 🎯 因為一開機已經抓過位置，此時直接使用現有的 currentLatLng（若還沒抓到則給預設值）
+                                val originLat = currentLatLng?.latitude ?: 25.0330
+                                val originLng = currentLatLng?.longitude ?: 121.5654
+
+                                coroutineScope.launch {
+                                    try {
+                                        val client = io.ktor.client.HttpClient {
+                                            install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) {
+                                                json(kotlinx.serialization.json.Json { ignoreUnknownKeys = true })
+                                            }
+                                        }
+                                        val routeApi = RouteApiService(client)
+
+                                        val routePoints = routeApi.getScooterRoute(
+                                            originLat = originLat,
+                                            originLng = originLng,
+                                            destLat = destLat,
+                                            destLng = destLng
+                                        )
+
+                                        println("🧭 成功取得導航點數量: ${routePoints.size}")
+                                        currentRoutePoints = routePoints
+                                        client.close()
+                                    } catch (e: Exception) {
+                                        println("❌ 導航請求失敗: ${e.message}")
+                                        e.printStackTrace()
+                                    } finally {
+                                        isCalculatingRoute = false
+                                    }
+                                }
                             },
+                            enabled = !isCalculatingRoute,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("開啟導航前往")
+                            Text(if (isCalculatingRoute) "正在規劃導航..." else "規劃機車導航路線")
                         }
                     }
                 }
@@ -378,8 +393,8 @@ fun App() {
 fun ParkingItemCard(
     item: ParkingSpace,
     currentLatLng: LatLng?,
-    isFavorite: Boolean,          // 👈 參數
-    onFavoriteClick: () -> Unit,   // 👈 回呼
+    isFavorite: Boolean,
+    onFavoriteClick: () -> Unit,
     onClick: () -> Unit
 ) {
     val distanceText = remember(currentLatLng, item) {
@@ -413,7 +428,6 @@ fun ParkingItemCard(
             modifier = Modifier.weight(1f)
         )
 
-        // 🎯 愛心收藏按鈕
         IconButton(onClick = onFavoriteClick) {
             Icon(
                 imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -426,7 +440,7 @@ fun ParkingItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick), // 👈 讓整張卡片可被點擊
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {

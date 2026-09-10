@@ -26,6 +26,10 @@ kotlin {
             isStatic = true
             xcf.add(this)
         }
+        // 🎯 明確指定此 target 的最低 iOS 版本
+        compilations.all {
+            kotlinOptions.freeCompilerArgs += "-Xbinary=minimumOSVersion=15.0"
+        }
     }
     iosArm64 {
         binaries.framework {
@@ -33,12 +37,18 @@ kotlin {
             isStatic = true
             xcf.add(this)
         }
+        compilations.all {
+            kotlinOptions.freeCompilerArgs += "-Xbinary=minimumOSVersion=15.0"
+        }
     }
     iosSimulatorArm64 {
         binaries.framework {
             baseName = "shared"
             isStatic = true
             xcf.add(this)
+        }
+        compilations.all {
+            kotlinOptions.freeCompilerArgs += "-Xbinary=minimumOSVersion=15.0"
         }
     }
 
