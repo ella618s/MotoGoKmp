@@ -6,23 +6,35 @@ import io.ktor.client.request.*
 import io.ktor.http.*
 import com.example.motogokmp.models.ScooterRouteRequest
 import com.example.motogokmp.models.ScooterRouteResponse
-import com.example.motogokmp.models.Coordinate
 
 class RouteApiService(private val client: HttpClient) {
-    // 假設你的後端網址，如果在模擬器/真機測試，請確保網址正確 (例如 Render 上的 https://motogo-backend-df5x.onrender.com)
     private val baseUrl = "https://motogo-backend-df5x.onrender.com/api/v1/route/scooter"
 
-    suspend fun getScooterRoute(originLat: Double, originLng: Double, destLat: Double, destLng: Double): List<Coordinate> {
+    // 👈 這裡把 preference 參數加進來 (預設傳入 "standard")
+    suspend fun getScooterRoute(
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double,
+        preference: String = "standard"
+    ): ScooterRouteResponse {
         try {
             val response: ScooterRouteResponse = client.post(baseUrl) {
                 contentType(ContentType.Application.Json)
-                setBody(ScooterRouteRequest(origin_lat = originLat, origin_lng = originLng, dest_lat = destLat, dest_lng = destLng))
+                setBody(ScooterRouteRequest(
+                    origin_lat = originLat,
+                    origin_lng = originLng,
+                    dest_lat = destLat,
+                    dest_lng = destLng,
+                    preference = preference
+                ))
             }.body()
 
-            return response.points
+            return response // 👈 直接回傳整包
         } catch (e: Exception) {
             e.printStackTrace()
-            return emptyList()
+            // 發生例外時回傳空的 Response 避免崩潰
+            return ScooterRouteResponse(status = "error", points = emptyList(), steps = emptyList())
         }
     }
 }

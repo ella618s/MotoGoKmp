@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import com.example.motogokmp.models.Coordinate
+import com.example.motogokmp.models.RouteStep
+import com.example.motogokmp.models.RoutingPreference
 import com.example.motogokmp.network.RouteApiService
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.launch
@@ -26,26 +28,22 @@ fun App() {
     MaterialTheme {
         var parkingList by remember { mutableStateOf<List<ParkingSpace>>(emptyList()) }
         var isLoading by remember { mutableStateOf(true) }
-        // 目前選擇的城市代碼，預設為 Taipei
-        var selectedCity by remember { mutableStateOf("Taipei") }
-        // 定位相關狀態
-        var locationInfo by remember { mutableStateOf("正在取得定位...") }
+        var selectedCity by remember { mutableStateOf("Taipei") } // 目前選擇的城市代碼，預設為 Taipei
+        var locationInfo by remember { mutableStateOf("正在取得定位...") }// 定位相關狀態
         var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
         val locationService = remember { LocationService() }
-        // 檢視模式狀態：false 為清單模式，true 為地圖模式
-        var isMapMode by remember { mutableStateOf(false) }
+        var isMapMode by remember { mutableStateOf(false) }// 檢視模式狀態：false 為清單模式，true 為地圖模式
         var selectedParking by remember { mutableStateOf<ParkingSpace?>(null) }
         var searchQuery by remember { mutableStateOf("") }
         var showOnlyAvailable by remember { mutableStateOf(false) } // 是否只顯示有剩餘車位的開關
-        // 記錄已被加入最愛的停車場名稱集合
-        var favoriteNames by remember { mutableStateOf(emptySet<String>()) }
-        var showOnlyFavorites by remember { mutableStateOf(false) } // 👈 是否只顯示最愛
-        // 宣告儲存導航路線點位的變數
-        var currentRoutePoints by remember { mutableStateOf<List<Coordinate>>(emptyList()) }
+        var favoriteNames by remember { mutableStateOf(emptySet<String>()) }// 記錄已被加入最愛的停車場名稱集合
+        var showOnlyFavorites by remember { mutableStateOf(false) } // 是否只顯示最愛
+        var currentRoutePoints by remember { mutableStateOf<List<Coordinate>>(emptyList()) }// 宣告儲存導航路線點位的變數
         val coroutineScope = rememberCoroutineScope()
         var isCalculatingRoute by remember { mutableStateOf(false) }
+        var routePreference by remember { mutableStateOf(RoutingPreference()) }
+        var currentRouteSteps by remember { mutableStateOf<List<RouteStep>>(emptyList()) }
 
-        // 🎯 1. App 一開機立刻自動請求權限並取得定位，解決第一次導航延遲的問題
         LaunchedEffect(Unit) {
             while (currentLatLng == null) {
                 locationService.getCurrentLocation { latLng ->
@@ -53,12 +51,10 @@ fun App() {
                         currentLatLng = latLng
                     }
                 }
-                delay(500) // 每 0.5 秒自動重試一次，直到使用者按允許並成功取得座標
+                delay(500)
             }
         }
 
-        // 載入 API 資料
-        // 🎯 監聽 selectedCity，只要城市改變就重新抓取對應 API 資料
         LaunchedEffect(selectedCity) {
             isLoading = true
             try {
@@ -73,10 +69,15 @@ fun App() {
             }
         }
 
-        // 🎯 結合關鍵字搜尋、車位快篩、最愛快篩與 GPS 距離排序的過濾清單
-        val filteredParkingList = remember(parkingList, searchQuery, showOnlyAvailable, showOnlyFavorites, favoriteNames, currentLatLng) {
+        val filteredParkingList = remember(
+            parkingList,
+            searchQuery,
+            showOnlyAvailable,
+            showOnlyFavorites,
+            favoriteNames,
+            currentLatLng
+        ) {
             val list = parkingList.filter { parking ->
-                // 關鍵字過濾
                 val matchesSearch = if (searchQuery.isBlank()) {
                     true
                 } else {
@@ -84,14 +85,12 @@ fun App() {
                             parking.address.contains(searchQuery, ignoreCase = true)
                 }
 
-                // 車位快篩過濾
                 val matchesAvailable = if (showOnlyAvailable) {
                     parking.availableSpaces > 0
                 } else {
                     true
                 }
 
-                // 收藏快篩過濾
                 val matchesFavorite = if (showOnlyFavorites) {
                     favoriteNames.contains(parking.name)
                 } else {
@@ -101,7 +100,6 @@ fun App() {
                 matchesSearch && matchesAvailable && matchesFavorite
             }
 
-            // 距離排序
             if (currentLatLng != null) {
                 list.sortedBy { parking ->
                     calculateDistanceKm(
@@ -120,17 +118,17 @@ fun App() {
             topBar = {
                 TopAppBar(
                     title = {
-                        val cityName = when(selectedCity) {
+                        val cityName = when (selectedCity) {
                             "taipei" -> "台北市"
                             "NewTaipei" -> "新北市"
                             "Taichung" -> "台中市"
                             else -> selectedCity
                         }
-                        Text(if (isMapMode) "MotoGo - $cityName 地圖" else "MotoGo - $cityName 即時停車位")
+                        Text(if (isMapMode) "MotoGo - \n(cityName 地圖" else "MotoGo -\n)cityName 即時停車位")
                     },
                     actions = {
                         TextButton(onClick = {
-                            val nextCity = when(selectedCity) {
+                            val nextCity = when (selectedCity) {
                                 "Taipei" -> "NewTaipei"
                                 "NewTaipei" -> "Taichung"
                                 else -> "Taipei"
@@ -141,9 +139,10 @@ fun App() {
                             }
 
                             selectedCity = nextCity
-                            currentRoutePoints = emptyList() // 切換城市時立刻清空舊導航線！
+                            currentRoutePoints = emptyList()
+                            currentRouteSteps = emptyList()
                         }) {
-                            val nextCityName = when(selectedCity) {
+                            val nextCityName = when (selectedCity) {
                                 "Taipei" -> "切換新北"
                                 "NewTaipei" -> "切換台中"
                                 else -> "切換台北"
@@ -173,7 +172,11 @@ fun App() {
                         currentLatLng = currentLatLng,
                         routePoints = currentRoutePoints,
                         onMarkerClick = { parking ->
-                            selectedParking = parking
+                            if (selectedParking?.name != parking.name) {
+                                selectedParking = parking
+                                currentRoutePoints = emptyList() // 🎯 切換新停車場時清空舊路線
+                                currentRouteSteps = emptyList()  // 🎯 清空舊步驟
+                            }
                         }
                     )
                     Surface(
@@ -250,8 +253,6 @@ fun App() {
                         )
                     }
 
-                    // 🎯 這裡已經把原本佔空間又醜的「取得目前 GPS 座標」手動按鈕卡片整個移除！
-
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -271,7 +272,11 @@ fun App() {
                                     }
                                 },
                                 onClick = {
-                                    selectedParking = item
+                                    if (selectedParking?.name != item.name) {
+                                        selectedParking = item
+                                        currentRoutePoints = emptyList() // 🎯 切換新停車場時清空舊路線
+                                        currentRouteSteps = emptyList()  // 🎯 清空舊步驟
+                                    }
                                 }
                             )
                         }
@@ -289,7 +294,8 @@ fun App() {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(24.dp)
+                            .windowInsetsPadding(WindowInsets.safeDrawing), // 自動適應 iOS 安全邊距
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
@@ -319,6 +325,30 @@ fun App() {
                                 )
                             }
                         }
+                        Text("導航偏好：", style = MaterialTheme.typography.bodyMedium)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = routePreference.mode == com.example.motogokmp.models.ScooterRouteMode.STANDARD,
+                                onClick = {
+                                    routePreference =
+                                        routePreference.copy(mode = com.example.motogokmp.models.ScooterRouteMode.STANDARD)
+                                },
+                                label = { Text("標準") }
+                            )
+
+                            FilterChip(
+                                selected = routePreference.mode == com.example.motogokmp.models.ScooterRouteMode.AVOID_BRIDGES,
+                                onClick = {
+                                    routePreference =
+                                        routePreference.copy(mode = com.example.motogokmp.models.ScooterRouteMode.AVOID_BRIDGES)
+                                },
+                                label = { Text("避開高架橋") }
+                            )
+                        }
 
                         Text(
                             text = "地址：${currentParking.address}",
@@ -338,15 +368,14 @@ fun App() {
                         val destLat = currentParking.lat
                         val destLng = currentParking.lng
 
+                        // 🎯 簡化為直接規劃路線並繪製在地圖上，點擊後即可開始導航
                         Button(
                             onClick = {
                                 if (isCalculatingRoute) return@Button
                                 isCalculatingRoute = true
 
                                 isMapMode = true
-                                selectedParking = null
 
-                                // 🎯 因為一開機已經抓過位置，此時直接使用現有的 currentLatLng（若還沒抓到則給預設值）
                                 val originLat = currentLatLng?.latitude ?: 25.0330
                                 val originLng = currentLatLng?.longitude ?: 121.5654
 
@@ -354,26 +383,30 @@ fun App() {
                                     try {
                                         val client = io.ktor.client.HttpClient {
                                             install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) {
-                                                json(kotlinx.serialization.json.Json { ignoreUnknownKeys = true })
+                                                json(kotlinx.serialization.json.Json {
+                                                    ignoreUnknownKeys = true
+                                                })
                                             }
                                         }
                                         val routeApi = RouteApiService(client)
 
-                                        val routePoints = routeApi.getScooterRoute(
+                                        val routeResponse = routeApi.getScooterRoute(
                                             originLat = originLat,
                                             originLng = originLng,
                                             destLat = destLat,
-                                            destLng = destLng
+                                            destLng = destLng,
+                                            preference = routePreference.mode.name.lowercase()
                                         )
 
-                                        println("🧭 成功取得導航點數量: ${routePoints.size}")
-                                        currentRoutePoints = routePoints
+                                        currentRoutePoints = routeResponse.points
+                                        println("🧭 成功取得導航點數量: ${routeResponse.points.size}")
+
                                         client.close()
                                     } catch (e: Exception) {
-                                        println("❌ 導航請求失敗: ${e.message}")
                                         e.printStackTrace()
                                     } finally {
                                         isCalculatingRoute = false
+                                        selectedParking = null // 計算完成後收起面板，在地圖上檢視路線
                                     }
                                 }
                             },
